@@ -10,6 +10,7 @@ import hashlib
 import json
 from collections.abc import Iterable, Iterator
 from pathlib import Path
+from typing import cast
 
 from vnfake.config import AppConfig
 from vnfake.data.chunking import Chunk
@@ -115,7 +116,7 @@ def _wrap_progress(iterator: Iterable[list[Chunk]], enabled: bool) -> Iterable[l
     except ImportError:
         logger.warning("tqdm not installed; progress bar disabled")
         return iterator
-    return tqdm(iterator, desc="Embedding", unit="batch")
+    return cast(Iterable[list[Chunk]], tqdm(iterator, desc="Embedding", unit="batch"))
 
 
 def build_index(

@@ -145,15 +145,15 @@ class QdrantStore:
         """
         if top_k < 1:
             raise ValueError(f"top_k must be >= 1, got {top_k}")
-
-        # SỬ DỤNG query_points THAY VÌ search
         response = self._client.query_points(
             collection_name=name,
             query=list(query_vector),
             limit=top_k,
             with_payload=with_payload,
         )
-        return [_hit_to_scored(h) for h in response.points]
+        # ``response.points`` is ``list[ScoredPoint]`` on qdrant-client>=1.10.
+        # Filter out any ``None`` defensively (some embedded builds return them).
+        return [_hit_to_scored(p) for p in response.points if p is not None]
 
 
 def _hit_to_scored(hit: object) -> ScoredChunk:

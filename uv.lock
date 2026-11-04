@@ -3351,6 +3351,15 @@ wheels = [
 ]
 
 [[package]]
+name = "types-tqdm"
+version = "4.70.0.20261102"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/07/7a/fd1ae32dbb82d5c1d22824b2229190598949359a5887521fd5252e3533a5/types_tqdm-4.70.0.20261102.tar.gz", hash = "sha256:7a5fc702848e74e28c94e1d6ff8d50deb6017a5fb67ba261d0fb42873c95e4ef", size = 19597, upload-time = "2026-11-02T08:31:51.514Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9b/5d/c90414cde95bd7b38b748e5ffe48cbbe9df3c2b9c904f09ec7c5b2e7ab74/types_tqdm-4.70.0.20261102-py3-none-any.whl", hash = "sha256:7e1f096d72f096c3fa672566d9fc03c05ad029194504ae7c679cbb10edb05e88", size = 25312, upload-time = "2026-11-02T08:31:50.468Z" },
+]
+
+[[package]]
 name = "typing-extensions"
 version = "4.16.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3534,6 +3543,7 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
     { name = "types-pyyaml" },
+    { name = "types-tqdm" },
 ]
 ui = [
     { name = "streamlit" },
@@ -3569,6 +3579,7 @@ requires-dist = [
     { name = "tqdm", specifier = ">=4.66" },
     { name = "transformers", specifier = ">=4.41" },
     { name = "types-pyyaml", marker = "extra == 'dev'" },
+    { name = "types-tqdm", marker = "extra == 'dev'" },
     { name = "underthesea", specifier = ">=6.8" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]

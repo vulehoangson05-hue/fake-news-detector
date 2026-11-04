@@ -47,6 +47,7 @@ dev = [
     "mypy>=1.10",
     "pre-commit>=3.7",
     "types-PyYAML",
+    "types-tqdm",
 ]
 ui = ["streamlit>=1.35"]
 
@@ -84,6 +85,14 @@ warn_unused_ignores = true
 warn_redundant_casts = true
 files = ["src/vnfake"]
 plugins = ["pydantic.mypy"]
+[[tool.mypy.overrides]]
+module = [
+    "underthesea.*",
+    "py_vncorenlp.*",
+    "FlagEmbedding.*",
+    "datasketch.*",
+]
+ignore_missing_imports = true
 
 # ---------- pytest ----------
 [tool.pytest.ini_options]
