@@ -21,9 +21,10 @@ dependencies = [
     "underthesea>=6.8",
     "datasketch>=1.6",
     # Retrieval
-    "qdrant-client>=1.9",
+    "qdrant-client>=1.10",
     "FlagEmbedding>=1.2",
     "sentence-transformers>=2.7",
+    "tqdm>=4.66",             # NEW: progress bar for scripts/03_index_kb.py
     # Models / training
     "torch>=2.2",
     "transformers>=4.41",
@@ -93,6 +94,8 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests requiring external services (Qdrant, GPU, ...)",
 ]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
 
 # ---------- coverage ----------
 [tool.coverage.run]

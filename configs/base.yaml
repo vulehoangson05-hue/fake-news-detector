@@ -15,7 +15,7 @@ paths:
 vifactcheck:
   statement_field: Statement
   evidence_field: Evidence
-  context_field: Context # analysis only — NEVER model input
+  context_field: Context   # analysis only — NEVER model input
   label_field: labels
 
 # Confirmed in Phase 0 (docs/DATA_AUDIT.md §4).
@@ -28,7 +28,11 @@ label_map:
 retrieval:
   retrieve_k: 50
   rerank_k: 5
-  embedding_model: BAAI/bge-m3
+  embedding:
+    model_name: BAAI/bge-m3
+    dim: 1024
+    batch_size: 16          # fits bge-m3 fp16 in ~1.5GB VRAM on 4GB cards
+    use_fp16: true          # effective only on CUDA
   reranker_model: BAAI/bge-reranker-v2-m3
   qdrant_collection_prefix: kb_chunks
 
@@ -52,3 +56,19 @@ decision:
   # Fallback abstain rule (see ARCHITECTURE §5.3); thresholds tuned on dev.
   tau_retrieval: 0.35
   tau_conf: 0.60
+
+preprocessing:
+  # Cleaned-text minimum length (characters).
+  min_chars: 100
+  chunk:
+    window: 3         # sentences per chunk
+    overlap: 1        # sentences shared between adjacent chunks
+  dedup:
+    minhash_threshold: 0.8
+    minhash_num_perm: 128
+    minhash_shingle_n: 5
+
+segmentation:
+  # "underthesea" (pure Python, no Java) or "vncorenlp" (faster, needs Java).
+  backend: underthesea
+  vncorenlp_dir: vncorenlp

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel
@@ -45,12 +45,21 @@ class ViFactCheckConfig(BaseModel):
     label_field: str = "labels"
 
 
+class EmbeddingConfig(BaseModel):
+    """Dense embedding model parameters (Phase 2 Part A)."""
+
+    model_name: str = "BAAI/bge-m3"
+    dim: int = 1024
+    batch_size: int = 16  # fits bge-m3 fp16 in ~1.5GB VRAM on 4GB cards
+    use_fp16: bool = True  # effective only on CUDA
+
+
 class RetrievalConfig(BaseModel):
     """Retrieval / rerank settings."""
 
     retrieve_k: int = 50
     rerank_k: int = 5
-    embedding_model: str = "BAAI/bge-m3"
+    embedding: EmbeddingConfig = EmbeddingConfig()
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
     qdrant_collection_prefix: str = "kb_chunks"
 
@@ -74,6 +83,36 @@ class TrainingConfig(BaseModel):
     warmup_ratio: float = 0.1
 
 
+class ChunkConfig(BaseModel):
+    """Sliding-window chunking parameters."""
+
+    window: int = 3
+    overlap: int = 1
+
+
+class DedupConfig(BaseModel):
+    """MinHash near-duplicate parameters."""
+
+    minhash_threshold: float = 0.8
+    minhash_num_perm: int = 128
+    minhash_shingle_n: int = 5
+
+
+class PreprocessingConfig(BaseModel):
+    """Text preprocessing knobs."""
+
+    min_chars: int = 100
+    chunk: ChunkConfig = ChunkConfig()
+    dedup: DedupConfig = DedupConfig()
+
+
+class SegmentationConfig(BaseModel):
+    """Word-segmentation backend selection."""
+
+    backend: Literal["underthesea", "vncorenlp"] = "underthesea"
+    vncorenlp_dir: Path = Path("vncorenlp")
+
+
 class DecisionConfig(BaseModel):
     """Thresholds for the abstain rule in Pipeline C."""
 
@@ -93,6 +132,8 @@ class AppConfig(BaseModel):
     classifier: ClassifierConfig = ClassifierConfig()
     training: TrainingConfig = TrainingConfig()
     decision: DecisionConfig = DecisionConfig()
+    preprocessing: PreprocessingConfig = PreprocessingConfig()
+    segmentation: SegmentationConfig = SegmentationConfig()
 
 
 class _Settings(BaseSettings):

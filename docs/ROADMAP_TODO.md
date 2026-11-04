@@ -67,14 +67,14 @@
 
 ## Phase 2 — Retrieval / Knowledge Base (M2)
 
-- [ ] `retrieval/embedder.py`: nạp model lazy, encode batch, hỗ trợ dense + sparse
+- [x] `retrieval/embedder.py`: nạp model lazy, encode batch, hỗ trợ dense (sparse/colbert sẽ bổ sung ở Phase 2 Part B khi dựng hybrid)
 - [ ] **Benchmark embedding** (bge-m3 vs ≥1 model tiếng Việt khác) trên tập truy vấn dev → ghi kết quả vào `docs/` và Decision Log
-- [ ] `retrieval/vector_store.py`: tạo collection (dense + sparse), upsert idempotent, search, `index_manifest.json`
-- [ ] `scripts/03_build_index.py`: build index từ chunks (resume được nếu gián đoạn)
+- [x] `retrieval/vector_store.py`: tạo collection (dense), upsert idempotent, search; (sparse + `index_manifest.json` sẽ bổ sung ở Part B)
+- [x] `scripts/03_index_kb.py` (+ `retrieval/index_builder.py`): build index từ chunks; chưa có resume (sẽ thêm nếu cần khi KB lớn hơn)
 - [ ] `retrieval/hybrid.py`: hợp nhất RRF + test với dữ liệu giả
 - [ ] `retrieval/reranker.py`: cross-encoder rerank top-50 → top-5
 - [ ] **Benchmark reranker** (có/không rerank)
-- [ ] `evaluation/retrieval_eval.py`: Recall@k, MRR, nDCG@k theo cách đã chốt ở Phase 0
+- [ ] `evaluation/retrieval_eval.py`: Recall@k, MRR, nDCG@k — **chuyển sang proxy metric theo DATA_AUDIT §6**
 - [ ] Unit test dùng `QdrantClient(":memory:")`; integration test đánh dấu `slow`
 
 **Exit criteria:** index build xong, truy vấn mẫu trả kết quả hợp lý; báo cáo retrieval có số liệu; thời gian truy vấn p95 < 300 ms (không tính rerank).

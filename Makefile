@@ -65,3 +65,15 @@ clean:
 	find . -type d -name ".pytest_cache" -prune -exec rm -rf {} +
 	find . -type d -name ".mypy_cache" -prune -exec rm -rf {} +
 	rm -rf .coverage htmlcov/
+
+prepare-data:
+	$(PY) scripts/02_prepare_data.py
+
+prepare-data-fast:
+	$(PY) scripts/02_prepare_data.py --skip-segmentation
+
+index-kb:
+	$(PY) scripts/03_index_kb.py
+
+index-kb-force:
+	$(PY) scripts/03_index_kb.py --force
