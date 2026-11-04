@@ -5,37 +5,50 @@
 
 ## Tổng quan Milestones
 
-| Milestone | Phase | Kết quả bàn giao | Trạng thái |
-|---|---|---|---|
-| **M0** Nền tảng & hiểu dữ liệu | 0 | Repo chạy được, báo cáo data audit, câu hỏi mở được chốt | ⬜ |
-| **M1** Data layer | 1 | Loader/cleaner/segmenter/chunker có test | ⬜ |
-| **M2** KB searchable | 2 | Qdrant index + hybrid search + rerank, có số đo retrieval | ⬜ |
-| **M3** Classifier baseline | 3 | PhoBERT & XLM-R fine-tune xong, báo cáo trên dev | ⬜ |
-| **M4** RAG end-to-end | 4 | Pipeline C chạy, có đường cong coverage–F1, chốt ngưỡng | ⬜ |
-| **M5** Serving & demo | 5 | API + Docker + UI demo chạy bằng 1 lệnh | ⬜ |
-| **M6** Hardening & báo cáo | 6 | CI, ablation, error analysis, báo cáo cuối | ⬜ |
+| Milestone                      | Phase | Kết quả bàn giao                                          | Trạng thái |
+| ------------------------------ | ----- | --------------------------------------------------------- | ---------- |
+| **M0** Nền tảng & hiểu dữ liệu | 0     | Repo chạy được, báo cáo data audit, câu hỏi mở được chốt  | ⬜         |
+| **M1** Data layer              | 1     | Loader/cleaner/segmenter/chunker có test                  | ⬜         |
+| **M2** KB searchable           | 2     | Qdrant index + hybrid search + rerank, có số đo retrieval | ⬜         |
+| **M3** Classifier baseline     | 3     | PhoBERT & XLM-R fine-tune xong, báo cáo trên dev          | ⬜         |
+| **M4** RAG end-to-end          | 4     | Pipeline C chạy, có đường cong coverage–F1, chốt ngưỡng   | ⬜         |
+| **M5** Serving & demo          | 5     | API + Docker + UI demo chạy bằng 1 lệnh                   | ⬜         |
+| **M6** Hardening & báo cáo     | 6     | CI, ablation, error analysis, báo cáo cuối                | ⬜         |
 
 ---
 
 ## Phase 0 — Khởi tạo & kiểm toán dữ liệu (M0)
 
 **Setup**
-- [ ] Tạo repo theo cấu trúc thư mục chuẩn (xem `ARCHITECTURE.md`), `pyproject.toml` (uv), `Makefile`, `.gitignore`, `.env.example`
-- [ ] Cấu hình `ruff`, `mypy`, `pytest`, `pre-commit`
-- [ ] `docker-compose.yml` với Qdrant (+ MLflow)
-- [ ] Viết `utils/logging.py`, `utils/seed.py`, `config.py` (Pydantic) + `configs/base.yaml`
-- [ ] Khởi tạo DVC, track `data/raw/`
+
+- [x] Tạo repo theo cấu trúc thư mục chuẩn (xem `ARCHITECTURE.md`), `pyproject.toml` (uv), `Makefile`, `.gitignore`, `.env.example`
+- [x] Cấu hình `ruff`, `mypy`, `pytest`, `pre-commit`
+- [x] `docker-compose.yml` với Qdrant (+ MLflow)
+- [x] Viết `utils/logging.py`, `utils/seed.py`, `config.py` (Pydantic) + `configs/base.yaml`
+- [x] Khởi tạo DVC, track `data/raw/` — **chưa chạy** `dvc init`
 
 **Data audit** (`scripts/01_audit_data.py` + `notebooks/00_data_audit.ipynb`)
-- [ ] Thống kê KB: số bài, độ dài `text`, phân bố nguồn, tỉ lệ rỗng/trùng
-- [ ] Thống kê ViFactCheck 3 split: kích thước, **phân bố nhãn**, độ dài `Statement`/`Evidence` (theo token PhoBERT)
-- [ ] **Xác định ngữ nghĩa nhãn 0/1** bằng cách đọc mẫu thực tế → ghi vào `label_map`
-- [ ] Đo **mức trùng lặp** giữa gold `Evidence` và KB (exact/n-gram) → quyết định cách đánh giá retrieval
-- [ ] Kiểm tra trùng `Statement` chéo train/dev/test (leakage)
-- [ ] Xác minh model HF dự kiến (tên, license, kích thước) và phần cứng sẵn có
-- [ ] Trả lời các **Câu hỏi mở** ở mục 10 của `ARCHITECTURE.md`
+
+- [x] Thống kê KB: số bài, độ dài `text`, phân bố nguồn, tỉ lệ rỗng/trùng
+- [x] Thống kê ViFactCheck 3 split: kích thước, phân bố nhãn, độ dài `Statement`/`Evidence` (theo **ký tự**)
+- [ ] Đo độ dài `Statement`/`Evidence` theo **token PhoBERT** (sau word-segment) — cần để chốt `max_len` ở Phase 3
+- [x] **Xác định ngữ nghĩa nhãn 0/1/2** bằng cách đọc mẫu thực tế → ghi vào `label_map` (`0=real, 1=fake, 2=unverifiable`)
+- [x] Đo **mức trùng lặp** giữa gold `Evidence` và KB (exact/n-gram) → quyết định cách đánh giá retrieval
+       _Script `scripts/01b_verify_overlap.py` đã có — chạy `make audit-overlap`, paste bảng vào `docs/DATA_AUDIT.md §6`_
+- [x] Kiểm tra trùng `Statement` chéo train/dev/test (leakage) — **script `scripts/01c_check_leakage.py` chưa viết**
+- [x] Xác minh model HF dự kiến (tên, license, kích thước) và phần cứng sẵn có
+- [x] Trả lời các **Câu hỏi mở** ở mục 10 của `ARCHITECTURE.md`
 
 **Exit criteria:** `make test` xanh với test rỗng; `docs/DATA_AUDIT.md` được viết; `label_map` và câu hỏi mở đã chốt.
+
+> **Trạng thái Phase 0 (2026-11-04):** _Exit criteria_ **đã đạt** (`docs/DATA_AUDIT.md` có, `label_map` chốt, câu hỏi mở chốt, `make test` xanh). Tuy nhiên còn **4 item** cần hoàn tất **trước khi mở Phase 2** vì là đầu vào trực tiếp của retrieval/model:
+>
+> 1. **DVC init** — bắt buộc theo `ARCHITECTURE §2.4` (Reproducible).
+> 2. **Overlap measurement** — quyết định metric retrieval (`ARCHITECTURE §7`, mục Retrieval).
+> 3. **Leakage check** — mitigate `R7` (`ARCHITECTURE §8`); bỏ qua sẽ làm sai lệch đánh giá Phase 3–4.
+> 4. **PhoBERT token length** — `max_len=256` hiện là giả định từ ký tự; cần đo token thật để xác nhận `R3`.
+>
+> Có thể coi Phase 0 "đóng" theo exit criteria và mở Phase 1 (data layer) song song. Trước khi tick hoàn toàn Phase 0 → đóng nốt 4 item trên.
 
 ---
 

@@ -1,0 +1,54 @@
+# Runtime configuration for vnfake.
+# All paths / model names / thresholds MUST live here — never hard-code in code.
+
+seed: 42
+log_level: INFO
+
+paths:
+  kb_dantri: data/raw/kb/dantri.jsonl
+  kb_vnexpress: data/raw/kb/vnexpress.jsonl
+  vifactcheck_dir: data/raw/vifactcheck
+  interim_dir: data/interim
+  processed_dir: data/processed
+  artifacts_dir: artifacts
+
+vifactcheck:
+  statement_field: Statement
+  evidence_field: Evidence
+  context_field: Context # analysis only — NEVER model input
+  label_field: labels
+
+# Confirmed in Phase 0 (docs/DATA_AUDIT.md §4).
+# 3-class classifier — do NOT collapse to binary.
+label_map:
+  0: real
+  1: fake
+  2: unverifiable
+
+retrieval:
+  retrieve_k: 50
+  rerank_k: 5
+  embedding_model: BAAI/bge-m3
+  reranker_model: BAAI/bge-reranker-v2-m3
+  qdrant_collection_prefix: kb_chunks
+
+classifier:
+  # Hardware: 4GB VRAM laptop / 6GB VRAM training PC → base models only.
+  model_name: vinai/phobert-base-v2
+  max_len_phobert: 256
+  max_len_xlmr: 512
+  # num_labels is derived from len(label_map) in code — do not duplicate here.
+
+training:
+  # Enforced for Phase 3 (fits 6GB VRAM).
+  fp16: true
+  gradient_accumulation_steps: 4
+  per_device_train_batch_size: 8
+  learning_rate: 2.0e-5
+  num_train_epochs: 4
+  warmup_ratio: 0.1
+
+decision:
+  # Fallback abstain rule (see ARCHITECTURE §5.3); thresholds tuned on dev.
+  tau_retrieval: 0.35
+  tau_conf: 0.60
