@@ -34,7 +34,7 @@
 - [ ] Đo độ dài `Statement`/`Evidence` theo **token PhoBERT** (sau word-segment) — cần để chốt `max_len` ở Phase 3
 - [x] **Xác định ngữ nghĩa nhãn 0/1/2** bằng cách đọc mẫu thực tế → ghi vào `label_map` (`0=real, 1=fake, 2=unverifiable`)
 - [x] Đo **mức trùng lặp** giữa gold `Evidence` và KB (exact/n-gram) → quyết định cách đánh giá retrieval
-       _Script `scripts/01b_verify_overlap.py` đã có — chạy `make audit-overlap`, paste bảng vào `docs/DATA_AUDIT.md §6`_
+      _Script `scripts/01b_verify_overlap.py` đã có — chạy `make audit-overlap`, paste bảng vào `docs/DATA_AUDIT.md §6`_
 - [x] Kiểm tra trùng `Statement` chéo train/dev/test (leakage) — **script `scripts/01c_check_leakage.py` chưa viết**
 - [x] Xác minh model HF dự kiến (tên, license, kích thước) và phần cứng sẵn có
 - [x] Trả lời các **Câu hỏi mở** ở mục 10 của `ARCHITECTURE.md`
@@ -54,18 +54,16 @@
 
 ## Phase 1 — Data layer (M1)
 
-- [ ] `schemas/kb.py`, `schemas/vifactcheck.py` (Pydantic) + test
-- [ ] `data/loaders.py`: `iter_kb_records()` streaming + file `rejected`; `load_split(name)` cho ViFactCheck
-- [ ] `data/cleaning.py`: `normalize_text()` (NFC…), bỏ boilerplate, lọc độ dài tối thiểu + test với ví dụ tiếng Việt có dấu
-- [ ] `data/dedup.py`: dedup theo `url` + MinHash near-duplicate + test
-- [ ] `data/segmentation.py`: wrapper VnCoreNLP/underthesea, cache, batch + test
-- [ ] `data/chunking.py`: tách câu + cửa sổ trượt (config: `window`, `overlap`, `target_tokens`) + test (không cắt giữa câu, overlap đúng)
-- [ ] `data/dataset.py`: `PairDataset` cho PhoBERT (đã tách từ) và XLM-R (thô)
-- [ ] `scripts/02_prepare_data.py` chạy end-to-end ra `data/processed/`
+- [x] `schemas/kb.py`, `schemas/vifactcheck.py` (Pydantic) + test
+- [x] `data/loaders.py`: `iter_kb_records()` streaming + file `rejected`; `load_split(name)` cho ViFactCheck
+- [x] `data/cleaning.py`: `normalize_text()` (NFC…), bỏ boilerplate, lọc độ dài tối thiểu + test với ví dụ tiếng Việt có dấu
+- [x] `data/dedup.py`: dedup theo `url` + MinHash near-duplicate + test; **bổ sung `dedup_vifactcheck_splits()`** khắc phục leakage (giữ dev/test, xoá train trùng)
+- [x] `data/segmentation.py`: wrapper VnCoreNLP/underthesea, cache, batch + test
+- [x] `data/chunking.py`: tách câu + cửa sổ trượt (config: `window`, `overlap`) + test; chunk_id deterministic qua `uuid5(doc_id, chunk_idx)`
+- [x] `data/dataset.py`: `PairDataset` cho PhoBERT (đã tách từ) và XLM-R (thô); `truncation="only_second"` cắt Evidence trước
+- [x] `data/prepare.py` + `scripts/02_prepare_data.py` chạy end-to-end ra `data/processed/` (kb_chunks + {train,dev,test}\_clean + rejected)
 
-**Exit criteria:** chạy được trên toàn bộ KB không crash; test coverage `data/` ≥ 80%; có báo cáo tỉ lệ dòng bị loại.
-
----
+## **Exit criteria:** chạy được trên toàn bộ KB không crash; test coverage `data/` ≥ 80%; có báo cáo tỉ lệ dòng bị loại.
 
 ## Phase 2 — Retrieval / Knowledge Base (M2)
 
