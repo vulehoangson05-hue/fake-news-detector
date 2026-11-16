@@ -405,3 +405,122 @@ def test_build_keyword_query_v2_filters_2syllable_stopwords() -> None:
     assert "trục lợi" in q
 
 
+def test_clean_web_text_and_tag_url_filtering(tmp_path: Path) -> None:
+    from vnfake.retrieval.web_search import clean_web_text, is_tag_or_search_url
+
+    # 1. Residual Markdown image/link syntax ("![M.U...", "[...]", "[]", "[text](url)")
+    assert (
+        clean_web_text("![M.U đã đưa ra quyết định sa thải HLV Ruben Amorim.")
+        == "M.U đã đưa ra quyết định sa thải HLV Ruben Amorim."
+    )
+    assert (
+        clean_web_text(
+            "[...] AnhCựu hậu vệ Rio Ferdinand yêu cầu lãnh đạo [Man Utd](https://vnexpress.net/mu) giải thích. []"
+        )
+        == "Anh Cựu hậu vệ Rio Ferdinand yêu cầu lãnh đạo Man Utd giải thích."
+    )
+
+    # 2. Tag headers ("# Man Utd...") and newspaper title lines ("- Báo VnExpress...")
+    assert clean_web_text("# Man Utd sắp sa thải HLV Carrick") == ""
+    assert clean_web_text("Man Utd sa thải Carrick - Báo VnExpress Thể thao") == ""
+
+    # 3. Glued category prefixes ("AnhMan Utd...") fixed while mixed-case whitelist preserved
+    glued = (
+        "AnhMan Utd quyết định sa thải HLV Ruben Amorim theo nguồn tin từ VnExpress, "
+        "VietNamNet, YouTube, TikTok trên iPhone, iPad chạy JavaScript và WordPress."
+    )
+    cleaned_glued = clean_web_text(glued)
+    assert "Anh Man Utd" in cleaned_glued
+    for brand in (
+        "VnExpress",
+        "VietNamNet",
+        "YouTube",
+        "TikTok",
+        "iPhone",
+        "iPad",
+        "JavaScript",
+        "WordPress",
+    ):
+        assert brand in cleaned_glued
+
+    # 4. Tag / topic / search URL detection & filtering in _build_hits_from_raw
+    assert is_tag_or_search_url("https://thanhnien.vn/hlv-amorim-tags1697865.html")
+    assert is_tag_or_search_url("https://vnexpress.net/tag/man-utd-123")
+    assert is_tag_or_search_url("https://vnexpress.net/chu-de/cup-fa-943")
+    assert is_tag_or_search_url("https://tuoitre.vn/tim-kiem/ket-qua.htm")
+    assert is_tag_or_search_url("https://dantri.com.vn/search/tin-tuc.htm")
+    assert not is_tag_or_search_url("https://vnexpress.net/man-utd-sa-thai-hlv-amorim-5002109.html")
+
+    search_cfg = SearchConfig(
+        provider="tavily",
+        search_depth="basic",
+        max_results=5,
+        topic="general",
+        cache_dir=tmp_path / "tag_filter_cache",
+        max_credits_spike=10,
+        timeout_s=5.0,
+        rate_limit_s=1.0,
+        user_agent="VNFakeTest/1.0",
+        include_domains=["vnexpress.net", "thanhnien.vn"],
+    )
+    searcher = TavilyWebSearcher(
+        search_cfg,
+        api_key="tvly-dummy",
+        page_fetcher=lambda _u: "",
+    )
+    hits, _ = searcher._build_hits_from_raw(
+        {
+            "results": [
+                {
+                    "title": "HLV Amorim tin tức mới nhất",
+                    "url": "https://thanhnien.vn/hlv-amorim-tags1697865.html",
+                    "content": "# Man Utd sa thải HLV Amorim",
+                    "raw_content": "# Man Utd sa thải HLV Amorim\n" * 20,
+                    "score": 0.99,
+                },
+                {
+                    "title": "Man Utd sa thải HLV Amorim - Báo VnExpress Thể thao",
+                    "url": "https://vnexpress.net/man-utd-sa-thai-hlv-amorim-5002109.html",
+                    "content": "AnhMan Utd quyết định sa thải HLV Ruben Amorim sau 14 tháng gắn bó.",
+                    "raw_content": "",
+                    "score": 0.91,
+                },
+            ]
+        },
+        allow_network_fetch=False,
+    )
+    assert len(hits) == 1
+    assert hits[0].url == "https://vnexpress.net/man-utd-sa-thai-hlv-amorim-5002109.html"
+    assert "Anh Man Utd quyết định sa thải" in hits[0].full_text
+    assert "- Báo VnExpress" not in hits[0].full_text
+
+
+def test_select_evidence_with_sources_deduplication_and_short_filter() -> None:
+    from vnfake.retrieval.evidence_selector import select_evidence_with_sources
+
+    claim = "Man Utd quyết định sa thải HLV Ruben Amorim sau 14 tháng gắn bó."
+    dup_sent = (
+        "Ban lãnh đạo Man Utd chính thức đưa ra quyết định sa thải HLV Ruben Amorim sau 14 tháng gắn bó."
+    )
+    near_dup_sent = (
+        "Ban lãnh đạo Man Utd chính thức đưa ra quyết định sa thải HLV Ruben Amorim sau 14 tháng gắn bó tại CLB."
+    )
+    other_sent = (
+        "Cựu tiền vệ Darren Fletcher sẽ tạm thời nắm quyền dẫn dắt đội một trong vai trò huấn luyện viên tạm quyền."
+    )
+
+    sourced_contexts = [
+        (f"Tin vắn.\n!@#$%^&*()\n{dup_sent}", "https://vnexpress.net/a.html", "vnexpress.net"),
+        (f"{dup_sent}", "https://tuoitre.vn/b.html", "tuoitre.vn"),
+        (f"{near_dup_sent}\n{other_sent}", "https://dantri.com.vn/c.html", "dantri.com.vn"),
+    ]
+
+    res = select_evidence_with_sources(claim, sourced_contexts, top_k=3, max_tokens=150)
+    assert len(res.items) == 2
+    texts = [it.text for it in res.items]
+    assert dup_sent in texts
+    assert other_sent in texts
+    assert near_dup_sent not in texts
+
+
+

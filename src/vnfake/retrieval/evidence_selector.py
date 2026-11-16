@@ -250,6 +250,34 @@ def select_evidence_from_context(
     )
 
 
+_MIN_SENTENCE_WORDS = 5
+_DEDUP_OVERLAP_THRESHOLD = 0.70
+
+
+def _is_near_duplicate_sentence(
+    candidate: str,
+    existing: str,
+    *,
+    threshold: float = _DEDUP_OVERLAP_THRESHOLD,
+) -> bool:
+    """Return True if ``candidate`` is an exact normalized match or >= ``threshold`` overlap with ``existing``."""
+    cand_tokens = tokenize_words(candidate)
+    prev_tokens = tokenize_words(existing)
+    if not cand_tokens or not prev_tokens:
+        return True
+    if " ".join(cand_tokens) == " ".join(prev_tokens):
+        return True
+    if (
+        compute_3gram_containment(candidate, existing) >= threshold
+        or compute_3gram_containment(existing, candidate) >= threshold
+    ):
+        return True
+    cand_set = set(cand_tokens)
+    prev_set = set(prev_tokens)
+    union_len = len(cand_set | prev_set)
+    return union_len > 0 and (len(cand_set & prev_set) / union_len) >= threshold
+
+
 def select_evidence_with_sources(
     statement: str,
     sourced_contexts: Sequence[tuple[str, str, str]],
@@ -260,8 +288,9 @@ def select_evidence_with_sources(
 ) -> SourcedEvidenceResult:
     """Select top-k sentences across multiple ``(page_text, url, domain)`` sources via BM25.
 
-    Splits sentences per source, deduplicates case-insensitively preserving the first
-    source metadata, runs the exact Phase 3 selector, and retains per-sentence
+    Splits sentences per source, filters out sentences with < 5 words or only special
+    characters, deduplicates exact & near-duplicate sentences (3-gram containment or
+    word Jaccard >= 0.70) while selecting top-k, and retains per-sentence
     ``{text, url, domain}`` metadata (Brief #5 §4.4 & §12.3.5).
     """
     unique_items: list[SourcedSentence] = []
@@ -275,40 +304,74 @@ def select_evidence_with_sources(
             s_norm = raw_sent.strip()
             if not s_norm:
                 continue
-            key = s_norm.lower()
-            if key in seen_keys:
+            words = tokenize_words(s_norm)
+            if len(words) < _MIN_SENTENCE_WORDS or len(s_norm.split()) < _MIN_SENTENCE_WORDS:
                 continue
-            seen_keys.add(key)
+            norm_key = " ".join(words)
+            if norm_key in seen_keys:
+                continue
+            seen_keys.add(norm_key)
             unique_items.append(SourcedSentence(text=s_norm, url=url, domain=domain))
 
+    method: Literal["bm25", "reranker"] = "reranker" if scorer is not None else "bm25"
     if not unique_items:
         return SourcedEvidenceResult(
             text="",
             items=[],
             word_count=0,
-            method="reranker" if scorer is not None else "bm25",
+            method=method,
         )
 
-    sel = select_evidence_from_sentences(
-        statement,
-        [item.text for item in unique_items],
-        top_k=top_k,
-        max_tokens=max_tokens,
-        scorer=scorer,
-    )
-
-    chosen_items: list[SourcedSentence] = []
-    if len(sel.sentence_indices) == 1:
-        # Handle single sentence possibly truncated to max_tokens
-        orig = unique_items[sel.sentence_indices[0]]
-        chosen_items.append(SourcedSentence(text=sel.text, url=orig.url, domain=orig.domain))
+    clean_sents = [item.text for item in unique_items]
+    if scorer is not None:
+        scores = scorer.score_pairs(normalize_text(statement), clean_sents)
     else:
-        for idx in sel.sentence_indices:
-            chosen_items.append(unique_items[idx])
+        scores = score_sentences_bm25(statement, clean_sents)
+
+    word_lists = [s.split() for s in clean_sents]
+    ranked = sorted(range(len(clean_sents)), key=lambda i: (-scores[i], i))
+
+    chosen_indices: list[int] = []
+    chosen_texts: dict[int, str] = {}
+    total_words = 0
+
+    for idx in ranked:
+        if len(chosen_indices) >= top_k:
+            break
+        cand_text = clean_sents[idx]
+        if any(
+            _is_near_duplicate_sentence(cand_text, prev_text)
+            for prev_text in chosen_texts.values()
+        ):
+            continue
+
+        words = word_lists[idx]
+        w_len = len(words)
+        if not chosen_indices and w_len > max_tokens:
+            truncated = " ".join(words[:max_tokens])
+            chosen_indices.append(idx)
+            chosen_texts[idx] = truncated
+            total_words += max_tokens
+            break
+        if total_words + w_len <= max_tokens:
+            chosen_indices.append(idx)
+            chosen_texts[idx] = cand_text
+            total_words += w_len
+
+    chosen_indices.sort()
+    chosen_items = [
+        SourcedSentence(
+            text=chosen_texts[i],
+            url=unique_items[i].url,
+            domain=unique_items[i].domain,
+        )
+        for i in chosen_indices
+    ]
+    joined = " ".join(chosen_texts[i] for i in chosen_indices)
 
     return SourcedEvidenceResult(
-        text=sel.text,
+        text=joined,
         items=chosen_items,
-        word_count=sel.word_count,
-        method=sel.method,
+        word_count=total_words,
+        method=method,
     )

@@ -379,6 +379,150 @@ def is_allowed_domain(url: str, include_domains: list[str]) -> bool:
     return False
 
 
+_TAG_OR_SEARCH_PATH_RE = re.compile(
+    r"(?:/(?:tags?|chu-de|topics?|tim-kiem|search)(?:/|$)|-tags?\d*(?:\.html?|\.htm|$))",
+    re.IGNORECASE,
+)
+
+_VI_LOWER = "a-zàáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ"
+_VI_UPPER = "A-ZÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴĐ"
+
+_MIXED_CASE_WHITELIST: tuple[str, ...] = (
+    "VnExpress",
+    "VietNamNet",
+    "VietnamPlus",
+    "YouTube",
+    "iPhone",
+    "iPad",
+    "iOS",
+    "macOS",
+    "MacBook",
+    "iMac",
+    "TikTok",
+    "WordPress",
+    "JavaScript",
+    "TypeScript",
+    "ChatGPT",
+    "OpenAI",
+    "DeepMind",
+    "DeepSeek",
+    "GitHub",
+    "GitLab",
+    "LinkedIn",
+    "WhatsApp",
+    "WeChat",
+    "PlayStation",
+    "PayPal",
+    "MasterCard",
+    "VietinBank",
+    "VPBank",
+    "TPBank",
+    "MBBank",
+    "HDBank",
+    "LPBank",
+    "SeABank",
+    "VinFast",
+    "VietJet",
+    "McTominay",
+    "McDonald",
+    "TeamTalk",
+    "SkySports",
+    "mRNA",
+)
+
+_WHITELIST_ALT = "|".join(
+    re.escape(w) for w in sorted(_MIXED_CASE_WHITELIST, key=len, reverse=True)
+)
+_GLUE_SPLIT_RE = re.compile(
+    rf"(?P<keep>{_WHITELIST_ALT})|(?P<low>[{_VI_LOWER}])(?P<up>[{_VI_UPPER}])"
+)
+_NEWS_SUFFIX_RE = re.compile(
+    r"\s*[-\u2013\u2014|]\s*(?:Báo\s+|Tạp\s+chí\s+|Chuyên\s+trang\s+)?"
+    r"(?:VnExpress|Dân\s+trí|Tuổi\s+Trẻ|Thanh\s+Niên|VietNamNet|VietnamPlus|"
+    r"VTV|VOV|Nhân\s+Dân|Chính\s+phủ|Pháp\s+Luật|Lao\s+Động|Tiền\s+Phong|"
+    r"Người\s+Lao\s+Động|Znews).*$",
+    re.IGNORECASE | re.UNICODE,
+)
+_NESTED_IMG_LINK_RE = re.compile(
+    r"\[!\[[^\]]*\]\((?:[^()\n]|\([^()\n]*\))*\)\]\((?:[^()\n]|\([^()\n]*\))*\)"
+)
+_DATA_OR_EMPTY_IMG_RE = re.compile(
+    r"!(?:\[[^\]]*\]\(\s*data:image/(?:[^()\n]|\([^()\n]*\))*\)|\[\s*\]\((?:[^()\n]|\([^()\n]*\))*\))",
+    re.IGNORECASE,
+)
+_JS_OR_ANCHOR_LINK_RE = re.compile(
+    r"!?\[[^\]]*\]\(\s*(?:javascript:|#)(?:[^()\n]|\([^()\n]*\))*\)",
+    re.IGNORECASE,
+)
+_LINK_ONLY_LINE_RE = re.compile(
+    r"^(?:\s*[*+-]?\s*!?\[[^\]]*\]\((?:[^()\n]|\([^()\n]*\))*\)\s*)+$"
+)
+_MD_LINK_OR_IMG_RE = re.compile(r"!?\[([^\[\]]+)\]\((?:[^()\n]|\([^()\n]*\))*\)")
+_BRACKET_ELLIPSIS_RE = re.compile(r"\[\s*(?:\.{2,}|…)?\s*\]")
+_DANGLING_BANG_BRACKET_RE = re.compile(r"!\s*\[")
+
+
+def is_tag_or_search_url(url: str) -> bool:
+    """Return True if ``url`` points to a tag, topic, or search index page."""
+    path = (urlparse(url).path or "").lower()
+    if not path:
+        return False
+    return bool(_TAG_OR_SEARCH_PATH_RE.search(path))
+
+
+def clean_web_text(text: str) -> str:
+    """Clean residual Markdown syntax, tag headers, short newspaper title lines, and glued category prefixes."""
+    if not text:
+        return ""
+    cleaned = normalize_text(text)
+    if not cleaned:
+        return ""
+
+    # 1. Remove nested image banners, data-URI placeholder images, empty links/images, and js/# links
+    cleaned = _NESTED_IMG_LINK_RE.sub(" ", cleaned)
+    cleaned = _DATA_OR_EMPTY_IMG_RE.sub(" ", cleaned)
+    cleaned = _JS_OR_ANCHOR_LINK_RE.sub(" ", cleaned)
+
+    raw_lines = [ln.strip() for ln in cleaned.split("\n")]
+    non_nav_lines = [ln for ln in raw_lines if ln and not _LINK_ONLY_LINE_RE.match(ln)]
+    cleaned = "\n".join(non_nav_lines)
+
+    # Unwrap remaining markdown links/images [text](url) -> text, strip [...] / [] and dangling ![
+    cleaned = _MD_LINK_OR_IMG_RE.sub(r"\1", cleaned)
+    cleaned = _BRACKET_ELLIPSIS_RE.sub(" ", cleaned)
+    cleaned = _DANGLING_BANG_BRACKET_RE.sub("", cleaned)
+
+    # 2. Filter out # headings, short newspaper title lines ending with newspaper name, and short menu fragments
+    lines = [ln.strip() for ln in cleaned.split("\n")]
+    is_multiline = sum(1 for ln in lines if ln) > 1
+    kept_lines: list[str] = []
+    for ln in lines:
+        if not ln:
+            continue
+        if ln.startswith("#") or ln.startswith("* "):
+            continue
+        if _NEWS_SUFFIX_RE.search(ln):
+            continue
+        if is_multiline and len(re.findall(r"\w+", ln, flags=re.UNICODE)) < 6:
+            continue
+        kept_lines.append(ln)
+
+    if not kept_lines:
+        return ""
+
+    joined = "\n".join(kept_lines)
+    # 3. Fix glued category prefixes ("AnhMan Utd", "AnhCựu hậu vệ") while protecting mixed-case whitelist
+    joined = _GLUE_SPLIT_RE.sub(
+        lambda m: (
+            str(m.group("keep"))
+            if m.group("keep") is not None
+            else f"{m.group('low')} {m.group('up')}"
+        ),
+        joined,
+    )
+    return normalize_text(joined)
+
+
 def _compute_search_cache_key(
     query: str,
     cfg: SearchConfig,
@@ -597,10 +741,12 @@ class TavilyWebSearcher:
             results_list = []
 
         limit = max_results if max_results is not None else self._cfg.max_results
-        parsed_items: list[tuple[str, str, str, str, float]] = []
+        parsed_items: list[tuple[str, str, str, str, str, float]] = []
         urls_to_fetch: list[str] = []
 
-        for item in results_list[:limit]:
+        for item in results_list:
+            if len(parsed_items) >= limit:
+                break
             if not isinstance(item, dict):
                 continue
             url = str(item.get("url") or "").strip()
@@ -608,11 +754,16 @@ class TavilyWebSearcher:
                 continue
             if not is_allowed_domain(url, self._cfg.include_domains):
                 raise ValueError(f"Returned URL {url!r} violates include_domains whitelist!")
-            title = normalize_text(str(item.get("title") or ""))
-            snippet = normalize_text(str(item.get("content") or ""))
-            raw_content = normalize_text(str(item.get("raw_content") or ""))
+            if is_tag_or_search_url(url):
+                continue
+            raw_title = normalize_text(str(item.get("title") or ""))
+            clean_title = clean_web_text(raw_title)
+            snippet = clean_web_text(str(item.get("content") or ""))
+            raw_content = clean_web_text(str(item.get("raw_content") or ""))
             score = float(item.get("score") or 0.0)
-            parsed_items.append((url, title, snippet, raw_content, score))
+            parsed_items.append(
+                (url, clean_title or raw_title, clean_title, snippet, raw_content, score)
+            )
             if len(raw_content) < _MIN_RAW_CONTENT_CHARS:
                 urls_to_fetch.append(url)
 
@@ -638,24 +789,26 @@ class TavilyWebSearcher:
         fetch_ms = (time.perf_counter() - fetch_t0) * _MS_PER_SECOND
 
         hits: list[WebSearchHit] = []
-        for url, title, snippet, raw_content, score in parsed_items:
+        for url, display_title, clean_title, snippet, raw_content, score in parsed_items:
             if len(raw_content) >= _MIN_RAW_CONTENT_CHARS:
-                full_text = f"{title}\n{snippet}\n{raw_content}".strip()
+                full_text = "\n".join(p for p in (clean_title, snippet, raw_content) if p).strip()
                 text_source: Literal[
                     "tavily_raw_content", "trafilatura_fetch", "tavily_snippet"
                 ] = "tavily_raw_content"
             else:
-                fetched = fetched_by_url.get(url, "")
+                fetched = clean_web_text(fetched_by_url.get(url, ""))
                 if fetched:
-                    full_text = f"{title}\n{snippet}\n{fetched}".strip()
+                    full_text = "\n".join(p for p in (clean_title, snippet, fetched) if p).strip()
                     text_source = "trafilatura_fetch"
                 else:
-                    full_text = f"{title}\n{snippet}\n{raw_content}".strip()
+                    full_text = "\n".join(
+                        p for p in (clean_title, snippet, raw_content) if p
+                    ).strip()
                     text_source = "tavily_snippet"
 
             hits.append(
                 WebSearchHit(
-                    title=title,
+                    title=display_title,
                     url=url,
                     domain=extract_domain(url),
                     snippet=snippet,

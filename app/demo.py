@@ -225,6 +225,43 @@ def run_demo_verification(
     return v_badge, probs_update, warn_update, evidence_md, metrics_md
 
 
+_LOW_VRAM_THRESHOLD_GB = 5.0
+
+
+def _resolve_default_fp16(
+    config_fp16: bool,
+    *,
+    force_fp16: bool = False,
+    device: str | None = None,
+) -> bool:
+    """Default to fp16=True when running on a CUDA GPU with <= 5 GB VRAM (e.g. RTX 3050 4GB)."""
+    if force_fp16 or config_fp16:
+        return True
+    try:
+        import torch
+
+        if (device is None or device.startswith("cuda")) and torch.cuda.is_available():
+            props = torch.cuda.get_device_properties(0)
+            total_vram_gb = float(props.total_memory) / float(1024**3)
+            if total_vram_gb <= _LOW_VRAM_THRESHOLD_GB:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _warmup_verifier(verifier: LiveVerifier) -> None:
+    """Eagerly warm up word segmenter, BGE reranker, and 3-seed PhoBERT ensemble before UI launch."""
+    seg = getattr(verifier, "_segmenter", None)
+    if seg is not None:
+        seg_fn = getattr(seg, "segment", None)
+        if callable(seg_fn):
+            seg_fn("Khởi động bộ tách từ tiếng Việt.")
+    warmup_fn = getattr(verifier, "warmup", None)
+    if callable(warmup_fn):
+        warmup_fn()
+
+
 def create_demo(verifier: LiveVerifier | None = None) -> gr.Blocks:
     """Build the Gradio demo application Blocks interface."""
     active_verifier: LiveVerifier | None = verifier
@@ -234,7 +271,9 @@ def create_demo(verifier: LiveVerifier | None = None) -> gr.Blocks:
         if active_verifier is None:
             cfg = load_config()
             search_cfg = load_search_config()
-            active_verifier = LiveVerifier(cfg, search_cfg)
+            use_fp16 = _resolve_default_fp16(cfg.decision.use_fp16)
+            active_verifier = LiveVerifier(cfg, search_cfg, use_fp16=use_fp16)
+            _warmup_verifier(active_verifier)
         return active_verifier
 
     with gr.Blocks(
@@ -357,13 +396,19 @@ def main() -> int:
 
     cfg = load_config()
     search_cfg = load_search_config()
-    use_fp16 = True if args.fp16 else cfg.decision.use_fp16
+    use_fp16 = _resolve_default_fp16(
+        cfg.decision.use_fp16,
+        force_fp16=bool(args.fp16),
+        device=args.device,
+    )
     verifier = LiveVerifier(
         cfg,
         search_cfg,
         device=args.device,
         use_fp16=use_fp16,
     )
+    logger.info("Warming up models (underthesea, BGE reranker, 3-seed PhoBERT ensemble)...")
+    _warmup_verifier(verifier)
     demo = create_demo(verifier)
     logger.info("Launching Gradio demo on http://%s:%d (fp16=%s)", args.host, args.port, use_fp16)
     demo.launch(server_name=args.host, server_port=args.port, share=args.share)

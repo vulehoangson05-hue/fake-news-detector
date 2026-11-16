@@ -197,3 +197,41 @@ def test_run_demo_verification_workflow_and_error_handling() -> None:
     assert "sự cố xử lý" in b_err
     assert p_err["visible"] is False
 
+
+def test_warmup_and_low_vram_fp16_default(monkeypatch: object) -> None:
+    from types import SimpleNamespace
+
+    import torch
+
+    from app.demo import _resolve_default_fp16, _warmup_verifier
+
+    mp = monkeypatch  # type: ignore[assignment]
+    mp.setattr(torch.cuda, "is_available", lambda: True)
+    mp.setattr(
+        torch.cuda,
+        "get_device_properties",
+        lambda _idx: SimpleNamespace(total_memory=int(4.0 * (1024**3))),
+    )
+    assert _resolve_default_fp16(False, device="cuda") is True
+
+    mp.setattr(
+        torch.cuda,
+        "get_device_properties",
+        lambda _idx: SimpleNamespace(total_memory=int(12.0 * (1024**3))),
+    )
+    assert _resolve_default_fp16(False, device="cuda") is False
+    assert _resolve_default_fp16(False, force_fp16=True, device="cuda") is True
+
+    calls: list[str] = []
+
+    class _SpyVerifier:
+        def __init__(self) -> None:
+            self._segmenter = SimpleNamespace(segment=lambda _t: calls.append("segment"))
+
+        def warmup(self) -> None:
+            calls.append("warmup")
+
+    _warmup_verifier(_SpyVerifier())  # type: ignore[arg-type]
+    assert calls == ["segment", "warmup"]
+
+
