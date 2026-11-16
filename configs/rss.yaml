@@ -1,0 +1,88 @@
+# configs/rss.yaml — Cấu hình Pipeline D (On-demand RSS Updater)
+# Danh sách feed do PM chốt ngày 2026-11-08 (13 feed: 8 VnExpress + 5 Dân Trí).
+# LƯU Ý: URL chưa được xác minh truy cập / robots.txt. Kiểm tra ở task audit RSS
+# (docs/DATA_AUDIT.md §2b) trước khi chạy thường xuyên.
+# Không hard-code URL trong code; không tự thêm/bớt feed ngoài file này.
+
+fetch:
+  user_agent: "vnfake-research-bot/0.1 (contact: sonbeo2015@gmail.com)"  # PM chốt 2026-11-08; CHỈ dùng ký tự ASCII (header HTTP)
+  request_timeout_s: 15              # đề xuất
+  min_delay_between_requests_s: 1.0  # đề xuất — rate limit theo từng domain
+  respect_robots_txt: true
+  use_conditional_get: true          # ETag / Last-Modified
+
+ingest:
+  max_items_per_feed: null           # null = lấy hết item có trong feed; chốt sau audit
+  label: real
+  ingest_source: rss
+  # published_date lấy từ pubDate (ISO-8601 UTC); crawl_date = thời điểm fetch (ISO-8601 UTC)
+
+feeds:
+  # --- VnExpress ---
+  - id: vnexpress_thoi_su
+    source: vnexpress
+    category: thoi-su
+    url: https://vnexpress.net/rss/thoi-su.rss
+    enabled: true
+  - id: vnexpress_khoa_hoc_cong_nghe
+    source: vnexpress
+    category: khoa-hoc-cong-nghe
+    url: https://vnexpress.net/rss/khoa-hoc-cong-nghe.rss
+    enabled: true
+  - id: vnexpress_the_thao
+    source: vnexpress
+    category: the-thao
+    url: https://vnexpress.net/rss/the-thao.rss
+    enabled: true
+  - id: vnexpress_oto_xe_may
+    source: vnexpress
+    category: oto-xe-may
+    url: https://vnexpress.net/rss/oto-xe-may.rss
+    enabled: true
+  - id: vnexpress_giai_tri
+    source: vnexpress
+    category: giai-tri
+    url: https://vnexpress.net/rss/giai-tri.rss
+    enabled: true
+  - id: vnexpress_phap_luat
+    source: vnexpress
+    category: phap-luat
+    url: https://vnexpress.net/rss/phap-luat.rss
+    enabled: true
+  - id: vnexpress_du_lich
+    source: vnexpress
+    category: du-lich
+    url: https://vnexpress.net/rss/du-lich.rss
+    enabled: true
+  - id: vnexpress_doi_song
+    source: vnexpress
+    category: doi-song
+    url: https://vnexpress.net/rss/doi-song.rss
+    enabled: true
+
+  # --- Dân Trí ---
+  - id: dantri_suc_khoe
+    source: dantri
+    category: suc-khoe
+    url: https://dantri.com.vn/rss/suc-khoe.rss
+    enabled: true
+  - id: dantri_the_thao
+    source: dantri
+    category: the-thao
+    url: https://dantri.com.vn/rss/the-thao.rss
+    enabled: true
+  - id: dantri_tin_moi_nhat          # chồng lấn với các feed chuyên mục -> dedup URL bắt buộc
+    source: dantri
+    category: tin-moi-nhat
+    url: https://dantri.com.vn/rss/tin-moi-nhat.rss
+    enabled: true
+  - id: dantri_giai_tri
+    source: dantri
+    category: giai-tri
+    url: https://dantri.com.vn/rss/giai-tri.rss
+    enabled: true
+  - id: dantri_phap_luat
+    source: dantri
+    category: phap-luat
+    url: https://dantri.com.vn/rss/phap-luat.rss
+    enabled: true

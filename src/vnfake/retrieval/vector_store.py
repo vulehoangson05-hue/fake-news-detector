@@ -1,8 +1,8 @@
-"""Qdrant vector store wrapper.
+"""Qdrant vector store wrapper (named dense + sparse vectors, hybrid search).
 
-All Qdrant clients MUST be created here (copilot-instructions §2). The store
-owns collection lifecycle and payload mapping; it does not know about models
-or config beyond what callers pass in.
+All Qdrant clients MUST be created here (copilot-instructions §2). Uses the
+Universal Query API (``client.query_points``) — ``client.search`` was removed
+in qdrant-client >= 1.12.
 """
 
 from __future__ import annotations
@@ -10,10 +10,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, PointStruct, VectorParams
+from qdrant_client import QdrantClient, models
 
 from vnfake.data.chunking import Chunk
+from vnfake.retrieval.embedder import SparseVectorData
 from vnfake.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -33,44 +33,47 @@ class ScoredChunk:
     crawl_date: str
     source: str
     score: float
+    published_date: str | None = None
+    ingest_source: str = "static"
 
 
 class QdrantStore:
-    """Thin wrapper around :class:`QdrantClient`.
+    """Thin wrapper around :class:`QdrantClient` for named-vector collections."""
 
-    Args:
-        client: A ``QdrantClient`` instance. Callers should obtain one via
-            :meth:`from_env` in production, or ``QdrantClient(":memory:")``
-            in tests.
-    """
-
-    def __init__(self, client: QdrantClient) -> None:
+    def __init__(
+        self,
+        client: QdrantClient,
+        *,
+        dense_name: str = "dense",
+        sparse_name: str = "sparse",
+    ) -> None:
         self._client = client
+        self._dense_name = dense_name
+        self._sparse_name = sparse_name
 
     @classmethod
-    def from_env(cls, url: str | None = None, api_key: str | None = None) -> QdrantStore:
-        """Build a store from ``QDRANT_URL`` / ``QDRANT_API_KEY`` env vars.
-
-        Defaults to ``http://localhost:6333`` (docker-compose service).
-        """
+    def from_env(
+        cls,
+        url: str | None = None,
+        api_key: str | None = None,
+        *,
+        dense_name: str = "dense",
+        sparse_name: str = "sparse",
+    ) -> QdrantStore:
+        """Build a store from ``QDRANT_URL`` / ``QDRANT_API_KEY`` env vars."""
         import os
 
         resolved_url = url or os.getenv("QDRANT_URL", "http://localhost:6333")
         resolved_key = api_key or os.getenv("QDRANT_API_KEY") or None
         logger.info("Connecting to Qdrant at %s", resolved_url)
-        return cls(QdrantClient(url=resolved_url, api_key=resolved_key))
+        return cls(
+            QdrantClient(url=resolved_url, api_key=resolved_key),
+            dense_name=dense_name,
+            sparse_name=sparse_name,
+        )
 
     def recreate_collection(self, name: str, dim: int, *, force: bool = False) -> None:
-        """Create ``name`` with a single dense vector of size ``dim`` (cosine).
-
-        Args:
-            name: Collection name (typically ``kb_chunks_<version>``).
-            dim: Vector dimensionality (must match the embedder).
-            force: If True and the collection exists, delete then recreate.
-
-        Raises:
-            ValueError: If the collection exists and ``force`` is False.
-        """
+        """Create ``name`` with named dense + sparse vectors."""
         existing = {c.name for c in self._client.get_collections().collections}
         if name in existing:
             if not force:
@@ -81,41 +84,43 @@ class QdrantStore:
             logger.info("Deleted existing collection %s", name)
         self._client.create_collection(
             collection_name=name,
-            vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
+            vectors_config={
+                self._dense_name: models.VectorParams(size=dim, distance=models.Distance.COSINE)
+            },
+            sparse_vectors_config={self._sparse_name: models.SparseVectorParams()},
         )
-        logger.info("Created collection %s (dim=%d, cosine)", name, dim)
+        logger.info("Created collection %s (dense dim=%d, sparse enabled)", name, dim)
 
     def upsert_chunks(
         self,
         name: str,
         chunks: Sequence[Chunk],
-        vectors: Sequence[Sequence[float]],
+        dense_vectors: Sequence[Sequence[float]],
+        sparse_vectors: Sequence[SparseVectorData],
         *,
         batch_size: int = 128,
     ) -> None:
-        """Idempotent upsert of chunks + their dense vectors.
-
-        Point ID = ``chunk.chunk_id`` (UUID5), so re-running overwrites rather
-        than duplicates.
-
-        Args:
-            name: Target collection.
-            chunks: Chunks in order; ``chunks[i]`` pairs with ``vectors[i]``.
-            vectors: Dense vectors, each of length equal to the collection dim.
-            batch_size: Number of points per ``upsert`` call.
-
-        Raises:
-            ValueError: If ``len(chunks) != len(vectors)``.
-        """
-        if len(chunks) != len(vectors):
-            raise ValueError(f"len(chunks)={len(chunks)} != len(vectors)={len(vectors)}")
-        if not chunks:
+        """Idempotent upsert of chunks + named dense/sparse vectors."""
+        n = len(chunks)
+        if len(dense_vectors) != n or len(sparse_vectors) != n:
+            raise ValueError(
+                f"Length mismatch: chunks={n}, dense={len(dense_vectors)}, "
+                f"sparse={len(sparse_vectors)}"
+            )
+        if n == 0:
             logger.warning("upsert_chunks called with empty input")
             return
 
         points = [
-            PointStruct(id=c.chunk_id, vector=list(v), payload=c.to_dict())
-            for c, v in zip(chunks, vectors, strict=True)
+            models.PointStruct(
+                id=c.chunk_id,
+                vector={
+                    self._dense_name: list(dv),
+                    self._sparse_name: models.SparseVector(indices=sv.indices, values=sv.values),
+                },
+                payload=c.to_dict(),
+            )
+            for c, dv, sv in zip(chunks, dense_vectors, sparse_vectors, strict=True)
         ]
         for start in range(0, len(points), batch_size):
             self._client.upsert(
@@ -124,7 +129,7 @@ class QdrantStore:
             )
         logger.info("Upserted %d chunks into %s", len(points), name)
 
-    def search(
+    def search_dense(
         self,
         name: str,
         query_vector: Sequence[float],
@@ -132,33 +137,82 @@ class QdrantStore:
         *,
         with_payload: bool = True,
     ) -> list[ScoredChunk]:
-        """Return the top-``k`` nearest chunks for a query vector.
-
-        Args:
-            name: Collection name.
-            query_vector: Dense query vector (length = collection dim).
-            top_k: Number of hits to return.
-            with_payload: Whether to fetch payload (required for evidence URL).
-
-        Returns:
-            Ordered hits (highest score first).
-        """
+        """Dense-only search."""
         if top_k < 1:
             raise ValueError(f"top_k must be >= 1, got {top_k}")
         response = self._client.query_points(
             collection_name=name,
             query=list(query_vector),
+            using=self._dense_name,
             limit=top_k,
             with_payload=with_payload,
         )
-        # ``response.points`` is ``list[ScoredPoint]`` on qdrant-client>=1.10.
-        # Filter out any ``None`` defensively (some embedded builds return them).
+        return [_hit_to_scored(p) for p in response.points if p is not None]
+
+    def search_sparse(
+        self,
+        name: str,
+        query_sparse: SparseVectorData,
+        top_k: int,
+        *,
+        with_payload: bool = True,
+    ) -> list[ScoredChunk]:
+        """Sparse-only search."""
+        if top_k < 1:
+            raise ValueError(f"top_k must be >= 1, got {top_k}")
+        response = self._client.query_points(
+            collection_name=name,
+            query=models.SparseVector(indices=query_sparse.indices, values=query_sparse.values),
+            using=self._sparse_name,
+            limit=top_k,
+            with_payload=with_payload,
+        )
+        return [_hit_to_scored(p) for p in response.points if p is not None]
+
+    def search_hybrid(
+        self,
+        name: str,
+        dense_query: Sequence[float],
+        sparse_query: SparseVectorData,
+        top_k: int,
+        *,
+        dense_prefetch_k: int,
+        sparse_prefetch_k: int,
+        with_payload: bool = True,
+    ) -> list[ScoredChunk]:
+        """Hybrid search with server-side RRF fusion."""
+        if top_k < 1:
+            raise ValueError(f"top_k must be >= 1, got {top_k}")
+        response = self._client.query_points(
+            collection_name=name,
+            prefetch=[
+                models.Prefetch(
+                    query=list(dense_query),
+                    using=self._dense_name,
+                    limit=dense_prefetch_k,
+                ),
+                models.Prefetch(
+                    query=models.SparseVector(
+                        indices=sparse_query.indices, values=sparse_query.values
+                    ),
+                    using=self._sparse_name,
+                    limit=sparse_prefetch_k,
+                ),
+            ],
+            query=models.FusionQuery(fusion=models.Fusion.RRF),
+            limit=top_k,
+            with_payload=with_payload,
+        )
         return [_hit_to_scored(p) for p in response.points if p is not None]
 
 
 def _hit_to_scored(hit: object) -> ScoredChunk:
     """Convert a Qdrant ``ScoredPoint`` to our flattened dataclass."""
     payload = getattr(hit, "payload", None) or {}
+    raw_pub = payload.get("published_date")
+    pub_date = str(raw_pub) if raw_pub is not None else None
+    raw_ingest = payload.get("ingest_source")
+    ingest_source = str(raw_ingest) if raw_ingest is not None else "static"
     return ScoredChunk(
         chunk_id=str(getattr(hit, "id", "")),
         doc_id=str(payload.get("doc_id", "")),
@@ -170,4 +224,6 @@ def _hit_to_scored(hit: object) -> ScoredChunk:
         crawl_date=str(payload.get("crawl_date", "")),
         source=str(payload.get("source", "")),
         score=float(getattr(hit, "score", 0.0)),
+        published_date=pub_date,
+        ingest_source=ingest_source,
     )

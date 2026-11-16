@@ -1,10 +1,4 @@
-"""Phase 2 — CLI wrapper around :func:`vnfake.retrieval.index_builder.build_index`.
-
-Usage:
-    uv run python scripts/03_index_kb.py
-    uv run python scripts/03_index_kb.py --force
-    uv run python scripts/03_index_kb.py --no-progress --chunks data/processed/kb_chunks.jsonl
-"""
+"""Phase 2 — CLI wrapper around :func:`vnfake.retrieval.index_builder.build_index`."""
 
 from __future__ import annotations
 
@@ -28,11 +22,7 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Chunks JSONL (default: <processed_dir>/kb_chunks.jsonl)",
     )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Delete + recreate the collection if it already exists",
-    )
+    parser.add_argument("--force", action="store_true")
     parser.add_argument("--no-progress", action="store_true")
     args = parser.parse_args(argv)
 
@@ -43,8 +33,12 @@ def main(argv: list[str] | None = None) -> int:
         model_name=cfg.retrieval.embedding.model_name,
         dim=cfg.retrieval.embedding.dim,
         use_fp16=cfg.retrieval.embedding.use_fp16,
+        weight_threshold=cfg.retrieval.sparse.weight_threshold,
     )
-    store = QdrantStore.from_env()
+    store = QdrantStore.from_env(
+        dense_name=cfg.retrieval.dense_vector_name,
+        sparse_name=cfg.retrieval.sparse_vector_name,
+    )
 
     stats = build_index(
         cfg,

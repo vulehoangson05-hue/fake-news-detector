@@ -25,6 +25,9 @@ dependencies = [
     "FlagEmbedding>=1.2",
     "sentence-transformers>=2.7",
     "tqdm>=4.66",             # NEW: progress bar for scripts/03_index_kb.py
+    "google-genai>=1.0",      # Phase 2.5: Gemini Flash query rewrite SDK (Task 2)
+    "feedparser>=6.0",        # Phase 2.5: RSS XML parsing for Pipeline D audit & ingest (Task 4)
+    "trafilatura>=1.10",      # Phase 2.5: Full-text article extraction from HTML for RSS (Task 4)
     # Models / training
     "torch>=2.2",
     "transformers>=4.41",
@@ -60,19 +63,26 @@ packages = ["src/vnfake"]
 
 [tool.uv]
 package = true
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
+torchvision = { index = "pytorch-cu126" }
 
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
 # ---------- ruff ----------
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["src", "scripts", "tests"]
+src = ["src", "scripts", "tests", "app"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "RUF", "TID"]
 ignore = ["E501"]  # enforced by ruff format
 
 [tool.ruff.lint.isort]
-known-first-party = ["vnfake"]
+known-first-party = ["vnfake", "app"]
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"
@@ -83,7 +93,7 @@ python_version = "3.11"
 strict = true
 warn_unused_ignores = true
 warn_redundant_casts = true
-files = ["src/vnfake"]
+files = ["src/vnfake", "app"]
 plugins = ["pydantic.mypy"]
 [[tool.mypy.overrides]]
 module = [
@@ -91,6 +101,10 @@ module = [
     "py_vncorenlp.*",
     "FlagEmbedding.*",
     "datasketch.*",
+    "google.*",
+    "feedparser.*",
+    "trafilatura.*",
+    "gradio.*",
 ]
 ignore_missing_imports = true
 
@@ -98,6 +112,7 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
+pythonpath = ["src", "."]
 addopts = "-ra --strict-markers --strict-config"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",

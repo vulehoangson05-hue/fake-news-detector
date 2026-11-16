@@ -1,0 +1,30 @@
+# Web Search configuration for vnfake (Brief #4 §3.1).
+# TAVILY_API_KEY must be set in environment / .env — NEVER place secrets here.
+
+provider: tavily
+search_depth: basic
+max_results: 5
+topic: general
+timeout_s: 15.0
+max_credits_spike: 150
+cache_dir: artifacts/cache/web_search
+rate_limit_s: 1.0
+user_agent: "vnfake-research-bot/0.1 (contact: vulehoangson05@gmail.com)"
+
+include_domains:
+  - vnexpress.net
+  - dantri.com.vn
+  - tuoitre.vn
+  - thanhnien.vn
+  - vietnamnet.vn
+  - vtv.vn
+  - vov.vn
+  - nhandan.vn
+  - baochinhphu.vn
+  - chinhphu.vn
+  - plo.vn
+  - laodong.vn
+  - tienphong.vn
+  - nld.com.vn
+  - vietnamplus.vn
+  - znews.vn

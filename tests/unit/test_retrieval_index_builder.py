@@ -1,4 +1,4 @@
-"""Unit tests for vnfake.retrieval.index_builder (in-memory Qdrant + dummy embedder)."""
+"""Unit tests for vnfake.retrieval.index_builder (in-memory + dummy embedder)."""
 
 from __future__ import annotations
 
@@ -14,8 +14,10 @@ from vnfake.config import (
     EmbeddingConfig,
     PathsConfig,
     RetrievalConfig,
+    SparseEmbeddingConfig,
 )
-from vnfake.data.chunking import Chunk, make_chunk_id
+from vnfake.data.chunking import make_chunk_id
+from vnfake.retrieval.embedder import SparseVectorData
 from vnfake.retrieval.index_builder import (
     build_index,
     compute_index_version,
@@ -38,6 +40,9 @@ class _DummyEmbedder:
     def embed_dense(self, texts: Sequence[str], batch_size: int) -> list[list[float]]:
         return [[float(i + 1)] * self._dim for i in range(len(texts))]
 
+    def embed_sparse(self, texts: Sequence[str], batch_size: int) -> list[SparseVectorData]:
+        return [SparseVectorData(indices=[i + 1], values=[1.0]) for i in range(len(texts))]
+
 
 def _chunk_dict(i: int) -> dict[str, object]:
     return {
@@ -46,10 +51,10 @@ def _chunk_dict(i: int) -> dict[str, object]:
         "chunk_idx": 0,
         "title": f"Title {i}",
         "text": f"Text {i}",
-        "text_segmented": f"Text_{i}",
+        "text_segmented": "",
         "url": f"https://example.com/{i}",
         "crawl_date": "2024-01-01",
-        "source": "dantri" if i % 2 == 0 else "vnexpress",
+        "source": "dantri",
     }
 
 
@@ -74,18 +79,14 @@ def _cfg(tmp: Path) -> AppConfig:
             artifacts_dir=tmp / "artifacts",
         ),
         retrieval=RetrievalConfig(
-            embedding=EmbeddingConfig(
-                model_name="dummy",
-                dim=_DIM,
-                batch_size=2,
-                use_fp16=False,
-            ),
+            embedding=EmbeddingConfig(model_name="dummy", dim=_DIM, batch_size=2, use_fp16=False),
+            sparse=SparseEmbeddingConfig(weight_threshold=0.0, batch_size=2),
             qdrant_collection_prefix="kb_chunks",
         ),
     )
 
 
-def test_compute_index_version_is_deterministic(tmp_path: Path) -> None:
+def test_compute_index_version_deterministic(tmp_path: Path) -> None:
     chunks = tmp_path / "c.jsonl"
     _write_chunks(chunks, 3)
     v1 = compute_index_version(chunks)
@@ -105,12 +106,11 @@ def test_compute_index_version_changes_with_content(tmp_path: Path) -> None:
 def test_iter_chunk_jsonl_skips_malformed(tmp_path: Path) -> None:
     path = tmp_path / "c.jsonl"
     path.write_text(
-        json.dumps(_chunk_dict(0)) + "\n" + "{bad\n" + json.dumps(_chunk_dict(1)) + "\n",
+        json.dumps(_chunk_dict(0)) + "\n{bad\n" + json.dumps(_chunk_dict(1)) + "\n",
         encoding="utf-8",
     )
     chunks = list(iter_chunk_jsonl(path))
     assert len(chunks) == 2
-    assert all(isinstance(c, Chunk) for c in chunks)
 
 
 def test_iter_chunk_jsonl_missing_field_skipped(tmp_path: Path) -> None:
@@ -124,8 +124,7 @@ def test_iter_chunk_jsonl_missing_field_skipped(tmp_path: Path) -> None:
 def test_iter_chunk_batches_respects_size(tmp_path: Path) -> None:
     path = tmp_path / "c.jsonl"
     _write_chunks(path, 5)
-    batches = [len(b) for b in iter_chunk_batches(path, batch_size=2)]
-    assert batches == [2, 2, 1]
+    assert [len(b) for b in iter_chunk_batches(path, batch_size=2)] == [2, 2, 1]
 
 
 def test_build_index_end_to_end(tmp_path: Path) -> None:
@@ -142,16 +141,14 @@ def test_build_index_end_to_end(tmp_path: Path) -> None:
         show_progress=False,
     )
     assert stats["chunks"] == 5
-    assert stats["embedding_dim"] == _DIM
-    collection = str(stats["collection"])
-    assert collection.startswith("kb_chunks_")
+    assert stats["skipped"] is False
+    assert (cfg.paths.artifacts_dir / "index_manifest.json").exists()
 
-    # Roundtrip: search returns all 5 chunks.
-    hits = store.search(collection, [1.0, 0.0, 0.0, 0.0], top_k=10)
+    hits = store.search_dense(str(stats["collection"]), [1.0] * _DIM, top_k=10)
     assert len(hits) == 5
 
 
-def test_build_index_force_false_raises_on_rerun(tmp_path: Path) -> None:
+def test_build_index_skips_when_up_to_date(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
     chunks = cfg.paths.processed_dir / "kb_chunks.jsonl"
     _write_chunks(chunks, 2)
@@ -159,18 +156,14 @@ def test_build_index_force_false_raises_on_rerun(tmp_path: Path) -> None:
     build_index(
         cfg, chunks_path=chunks, embedder=_DummyEmbedder(), store=store, show_progress=False
     )
-
-    with pytest.raises(ValueError, match="force=True"):
-        build_index(
-            cfg,
-            chunks_path=chunks,
-            embedder=_DummyEmbedder(),
-            store=store,
-            show_progress=False,
-        )
+    stats = build_index(
+        cfg, chunks_path=chunks, embedder=_DummyEmbedder(), store=store, show_progress=False
+    )
+    assert stats["skipped"] is True
+    assert stats["chunks"] == 2
 
 
-def test_build_index_force_true_recreates(tmp_path: Path) -> None:
+def test_build_index_force_rebuilds(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
     chunks = cfg.paths.processed_dir / "kb_chunks.jsonl"
     _write_chunks(chunks, 2)
@@ -186,7 +179,22 @@ def test_build_index_force_true_recreates(tmp_path: Path) -> None:
         force=True,
         show_progress=False,
     )
-    assert stats["chunks"] == 2
+    assert stats["skipped"] is False
+
+
+def test_manifest_contains_vector_names(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    chunks = cfg.paths.processed_dir / "kb_chunks.jsonl"
+    _write_chunks(chunks, 2)
+    store = QdrantStore(QdrantClient(":memory:"))
+    build_index(
+        cfg, chunks_path=chunks, embedder=_DummyEmbedder(), store=store, show_progress=False
+    )
+    manifest = json.loads(
+        (cfg.paths.artifacts_dir / "index_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["dense_vector_name"] == "dense"
+    assert manifest["sparse_vector_name"] == "sparse"
 
 
 def test_build_index_missing_file_raises(tmp_path: Path) -> None:

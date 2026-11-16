@@ -15,7 +15,7 @@ paths:
 vifactcheck:
   statement_field: Statement
   evidence_field: Evidence
-  context_field: Context   # analysis only — NEVER model input
+  context_field: Context # analysis only — NEVER model input
   label_field: labels
 
 # Confirmed in Phase 0 (docs/DATA_AUDIT.md §4).
@@ -26,15 +26,90 @@ label_map:
   2: unverifiable
 
 retrieval:
-  retrieve_k: 50
+  retrieve_k: 30
   rerank_k: 5
   embedding:
     model_name: BAAI/bge-m3
     dim: 1024
-    batch_size: 16          # fits bge-m3 fp16 in ~1.5GB VRAM on 4GB cards
-    use_fp16: true          # effective only on CUDA
-  reranker_model: BAAI/bge-reranker-v2-m3
+    batch_size: 16
+    use_fp16: true
+  sparse:
+    weight_threshold: 0.0 # drop weights <= this
+    batch_size: 16
+  hybrid:
+    dense_prefetch_k: 50
+    sparse_prefetch_k: 50
+    rrf_k: 60
+  reranker:
+    model_name: BAAI/bge-reranker-v2-m3
+    batch_size: 4
+    dtype: fp32
+    use_fp16: false
+    max_length: 512
   qdrant_collection_prefix: kb_chunks
+  dense_vector_name: dense
+  sparse_vector_name: sparse
+
+query_rewrite:
+  # Phase 2.5 — LLM Query Rewrite (disabled by default until Task 5 A/B is approved by PM).
+  enabled: false
+  model: gemini-3.1-flash-lite
+  timeout_s: 10.0
+  total_deadline_s: 12.0
+  max_retries: 2
+  max_retries_batch: 2
+  max_retries_online: 0
+  rpm_limit: 12
+  daily_request_budget: 80
+  quota_reset_tz: "US/Pacific"
+  temperature: 0.0
+  max_output_tokens: 64
+  max_keywords: 15
+  max_chars: 256
+  fusion: rewritten_only # rewritten_only | original+rewritten
+  cache_dir: artifacts/cache/query_rewrite
+  prompt_path: configs/prompts/query_rewrite.txt
+  prompt_version: v3
+  required: false
+  forbidden_phrases:
+    - "xin chào"
+    - "chào bạn"
+    - "dạ "
+    - "dạ,"
+    - "vâng"
+    - "tất nhiên"
+    - "dưới đây là"
+    - "giải thích"
+    - "tôi là"
+    - "không thể"
+    - "lưu ý:"
+    - "chú ý:"
+    - "bài thơ"
+    - "mùa thu hà nội"
+    - "lá vàng rơi"
+  drop_terms:
+    - "mấy bữa nay"
+    - "hôm nay"
+    - "ngày mai"
+    - "hôm qua"
+    - "năm nay"
+    - "mới đây"
+    - "sắp tới"
+    - "tháng sau"
+    - "chiều nay"
+    - "sáng nay"
+    - "tối nay"
+    - "thật hông"
+    - "thật không"
+    - "phải hông"
+    - "phải không"
+    - "đúng không"
+    - "đúng ko"
+    - "hả"
+    - "vậy trời"
+    - "mọi người"
+    - "bà con"
+    - "dân tình"
 
 classifier:
   # Hardware: 4GB VRAM laptop / 6GB VRAM training PC → base models only.
@@ -44,25 +119,43 @@ classifier:
   # num_labels is derived from len(label_map) in code — do not duplicate here.
 
 training:
-  # Enforced for Phase 3 (fits 6GB VRAM).
-  fp16: true
+  # Enforced for Phase 3 on PC (GTX 1660 Turing -> fp32 is faster and fits 6GB VRAM).
+  fp16: false
   gradient_accumulation_steps: 4
   per_device_train_batch_size: 8
   learning_rate: 2.0e-5
   num_train_epochs: 4
   warmup_ratio: 0.1
+  weight_decay: 0.01
 
 decision:
-  # Fallback abstain rule (see ARCHITECTURE §5.3); thresholds tuned on dev.
+  # Phase 4 relevance gate & abstain thresholds
+  # Source: artifacts/decision_gate_tuning.json (tuned on dev positives vs 3 negative pools, 2026-11-11).
+  # tau_rel = 0.7559 maximizes combined Youden's J (0.6737); tau_conf = 0.55 chosen over 0.50 per §12.3.3 sweep.
+  tau_rel: 0.7559
+  tau_conf: 0.55
   tau_retrieval: 0.35
-  tau_conf: 0.60
+  live_deadline_s: 20.0
+  use_fp16: false
+  demo_mode: false
+  ensemble_seeds: [42, 43, 44]
+  checkpoints:
+    - seed: 42
+      run_id: "phobert_v-c_s42_1794249027"
+      sha256: "7445112ce1fd75e120f95d20372bf57e9403436fa3eb408b1e4679b2622108c6"
+    - seed: 43
+      run_id: "phobert_v-c_s43_1794249869"
+      sha256: "d7803837daeccadbe57c0d1b609c27accee863a71d54ad5f16dae40ffd41ed09"
+    - seed: 44
+      run_id: "phobert_v-c_s44_1794250707"
+      sha256: "d7b3f9aef84b0111de1f24fd3769a0b0070bcfac69dde922be266dd3aab0050a"
 
 preprocessing:
   # Cleaned-text minimum length (characters).
   min_chars: 100
   chunk:
-    window: 3         # sentences per chunk
-    overlap: 1        # sentences shared between adjacent chunks
+    window: 3 # sentences per chunk
+    overlap: 1 # sentences shared between adjacent chunks
   dedup:
     minhash_threshold: 0.8
     minhash_num_perm: 128

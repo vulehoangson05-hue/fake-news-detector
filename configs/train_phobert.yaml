@@ -1,0 +1,13 @@
+# Phase 3 training preset for PhoBERT-base-v2 on PC (GTX 1660, fp32)
+model_name: vinai/phobert-base-v2
+model_type: phobert
+max_length: 256
+fp16: false
+per_device_train_batch_size: 8
+gradient_accumulation_steps: 4
+learning_rate: 2.0e-5
+num_train_epochs: 4
+warmup_ratio: 0.1
+weight_decay: 0.01
+seeds: [42, 43, 44]
+variants: ["baseline", "V-A", "V-B", "V-C"]

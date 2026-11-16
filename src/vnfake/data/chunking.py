@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass
+from typing import Literal
 
 from vnfake.data.segmentation import SegmenterProtocol
 from vnfake.schemas.kb import KBRecord
@@ -36,10 +37,16 @@ class Chunk:
     url: str
     crawl_date: str
     source: str
+    published_date: str | None = None
+    ingest_source: Literal["static", "rss"] = "static"
 
     def to_dict(self) -> dict[str, object]:
-        """Return a JSONL-serialisable dict."""
-        return {
+        """Return a JSONL-serialisable dict.
+
+        Omits ``published_date`` and ``ingest_source`` when at their default values
+        (``None`` and ``"static"``) to preserve exact byte identity of the static KB.
+        """
+        d: dict[str, object] = {
             "chunk_id": self.chunk_id,
             "doc_id": self.doc_id,
             "chunk_idx": self.chunk_idx,
@@ -50,6 +57,11 @@ class Chunk:
             "crawl_date": self.crawl_date,
             "source": self.source,
         }
+        if self.published_date is not None:
+            d["published_date"] = self.published_date
+        if self.ingest_source != "static":
+            d["ingest_source"] = self.ingest_source
+        return d
 
 
 def split_sentences(text: str) -> list[str]:
@@ -154,6 +166,8 @@ def chunk_record(
                 url=record.url,
                 crawl_date=record.crawl_date,
                 source=source,
+                published_date=record.published_date,
+                ingest_source=record.ingest_source,
             )
         )
     return chunks

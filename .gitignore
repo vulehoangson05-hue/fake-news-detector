@@ -49,3 +49,6 @@ vncorenlp/
 # ---------- DVC ----------
 .dvc/cache/
 .dvc/tmp/
+
+# ---------- Misc local scratch ----------
+project_tree.txt

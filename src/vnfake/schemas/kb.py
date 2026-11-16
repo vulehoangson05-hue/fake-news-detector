@@ -25,3 +25,5 @@ class KBRecord(BaseModel):
     label: Literal["real"] = "real"
     url: str = Field(min_length=1)
     crawl_date: str = Field(alias="date")
+    published_date: str | None = None
+    ingest_source: Literal["static", "rss"] = "static"

@@ -1,0 +1,13 @@
+# Phase 3 training preset for XLM-RoBERTa-base on PC (GTX 1660, fp32)
+model_name: xlm-roberta-base
+model_type: xlmr
+max_length: 512
+fp16: false
+per_device_train_batch_size: 4
+gradient_accumulation_steps: 8
+learning_rate: 2.0e-5
+num_train_epochs: 4
+warmup_ratio: 0.1
+weight_decay: 0.01
+seeds: [42, 43, 44]
+variants: ["baseline", "V-A", "V-B", "V-C"]

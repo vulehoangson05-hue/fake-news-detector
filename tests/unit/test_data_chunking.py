@@ -129,6 +129,7 @@ def test_chunk_to_dict_keys() -> None:
     record = _kb("A. B.")
     chunks = chunk_record(record, source="vnexpress", segmenter=None, window=2, overlap=0)
     d = chunks[0].to_dict()
+    # Default values (None and "static") are omitted to maintain byte-identity of static KB
     assert set(d.keys()) == {
         "chunk_id",
         "doc_id",
@@ -140,6 +141,25 @@ def test_chunk_to_dict_keys() -> None:
         "crawl_date",
         "source",
     }
+    # When non-default values are provided (e.g. RSS chunks), the extra keys appear
+    rss_chunk = Chunk(
+        chunk_id="rss_1",
+        doc_id="doc_rss",
+        chunk_idx=0,
+        title="RSS Title",
+        text="RSS Text",
+        text_segmented="",
+        url="https://example.com/rss",
+        crawl_date="2026-11-08",
+        source="vnexpress",
+        published_date="2026-11-08T10:00:00Z",
+        ingest_source="rss",
+    )
+    rss_dict = rss_chunk.to_dict()
+    assert "published_date" in rss_dict
+    assert "ingest_source" in rss_dict
+    assert rss_dict["published_date"] == "2026-11-08T10:00:00Z"
+    assert rss_dict["ingest_source"] == "rss"
 
 
 def test_chunk_dataclass_frozen() -> None:

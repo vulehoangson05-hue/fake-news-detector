@@ -1,0 +1,41 @@
+claim_id,claim,label,source_url,source_date,note,split
+claim_tune_001,Thủ tướng Chính phủ Phạm Minh Chính chủ trì phiên họp Chính phủ thường kỳ tháng 10 năm 2026,real,https://baochinhphu.vn/thu-tuong-chu-tri-phien-hop-chinh-phu-thuong-ky-102261101.htm,2026-11-01,Ví dụ mẫu: Diễn đạt lại nội dung có trong bài báo,tune
+claim_tune_002,Kỳ thi tốt nghiệp THPT năm 2026 sẽ được tổ chức hoàn toàn bằng hình thức thi trắc nghiệm trên máy tính cho 100% thí sinh,fake,https://baochinhphu.vn/phuong-an-thi-tot-nghiep-thpt-2026-102261102.htm,2026-11-02,Ví dụ mẫu: Bóp méo mốc thời gian hoặc phạm vi áp dụng,tune
+claim_tune_003,Giá vàng miếng SJC vượt mốc 90 triệu đồng một lượng do ảnh hưởng của xung đột địa chính trị mới bùng phát tại khu vực Trung Mỹ,unverifiable,https://vnexpress.net/gia-vang-sjc-tang-4800000.html,2026-11-03,Ví dụ mẫu: Thêm chi tiết nguyên nhân không hề được nhắc đến trong bài báo,tune
+claim_tune_004,,,,,,tune
+claim_tune_005,,,,,,tune
+claim_tune_006,,,,,,tune
+claim_tune_007,,,,,,tune
+claim_tune_008,,,,,,tune
+claim_tune_009,,,,,,tune
+claim_tune_010,,,,,,tune
+claim_test_001,,,,,,test
+claim_test_002,,,,,,test
+claim_test_003,,,,,,test
+claim_test_004,,,,,,test
+claim_test_005,,,,,,test
+claim_test_006,,,,,,test
+claim_test_007,,,,,,test
+claim_test_008,,,,,,test
+claim_test_009,,,,,,test
+claim_test_010,,,,,,test
+claim_test_011,,,,,,test
+claim_test_012,,,,,,test
+claim_test_013,,,,,,test
+claim_test_014,,,,,,test
+claim_test_015,,,,,,test
+claim_test_016,,,,,,test
+claim_test_017,,,,,,test
+claim_test_018,,,,,,test
+claim_test_019,,,,,,test
+claim_test_020,,,,,,test
+claim_test_021,,,,,,test
+claim_test_022,,,,,,test
+claim_test_023,,,,,,test
+claim_test_024,,,,,,test
+claim_test_025,,,,,,test
+claim_test_026,,,,,,test
+claim_test_027,,,,,,test
+claim_test_028,,,,,,test
+claim_test_029,,,,,,test
+claim_test_030,,,,,,test

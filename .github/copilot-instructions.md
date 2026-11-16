@@ -30,7 +30,7 @@ src/vnfake/{schemas,data,retrieval,models,training,pipeline,serving,evaluation,u
 - Chiều phụ thuộc cho phép: `utils ← schemas ← data ← retrieval/models ← training/pipeline ← serving/evaluation`.
   **Tầng dưới không được import tầng trên.**
 - Code chạy được nằm trong `src/`. `scripts/` chỉ là CLI mỏng gọi `src/`. `notebooks/` chỉ để khám phá, **không** import ngược từ notebook vào `src/`.
-- Mọi client Qdrant chỉ được tạo trong `retrieval/vector_store.py`. Mọi thao tác tách từ chỉ qua `data/segmentation.py`.
+- Mọi client Qdrant chỉ được tạo trong `retrieval/vector_store.py`. Mọi thao tác tách từ chỉ qua `data/segmentation.py`. Client Gemini chỉ được tạo trong `retrieval/query_rewriter.py`.
 
 ## 3. Cấu hình
 
@@ -45,8 +45,9 @@ src/vnfake/{schemas,data,retrieval,models,training,pipeline,serving,evaluation,u
 - **PhoBERT:** đầu vào **bắt buộc đã tách từ** (từ ghép nối bằng `_`), **không lowercase**, `max_length` theo config (mặc định 256). Không bao giờ đưa văn bản chưa tách từ vào PhoBERT tokenizer.
 - **XLM-R:** dùng văn bản thô đã NFC, không tách từ.
 - Đọc JSONL bằng **streaming** (generator), không `json.load` cả file lớn. Validate từng dòng bằng Pydantic; dòng lỗi ghi vào file `rejected`, không làm sập pipeline.
-- Schema dữ liệu nằm ở `src/vnfake/schemas/`. KB `date` được đổi tên thành `crawl_date`; **không** dùng nó để suy luận thời gian đăng bài.
-- ViFactCheck: model chỉ nhận `(Statement, Evidence)`. **Không đưa `Context` vào input của model.**
+- Schema dữ liệu nằm ở `src/vnfake/schemas/`. KB `date` được đổi tên thành `crawl_date`; **không** dùng nó để suy luận thời gian đăng bài. Bản ghi RSS có thêm `published_date` (từ `pubDate`) — luôn tách biệt với `crawl_date`.
+- Trường thời gian: file tĩnh `date` → `crawl_date` (alias ở schema/loader, **không sửa file raw**); RSS `pubDate` → `published_date` (ISO-8601 UTC). **Cấm** lọc/sắp xếp theo thời gian trên toàn KB hoặc dùng `crawl_date` như ngày đăng bài (task lọc thời gian ở Backlog).
+- ViFactCheck: đầu vào của mô hình phân loại = `(Statement, evidence_text)`. **`Context` không được đưa nguyên vào mô hình.** `Context` chỉ được dùng làm "bài báo giả lập" để chọn câu bằng chứng (`retrieval/evidence_selector.py`, xem `ARCHITECTURE.md` §5.2).
 - **Chống leakage:** không đọc split `test` trong code huấn luyện/tuning. Chỉ `evaluation/` mới được gọi `load_split("test")`, và phải có cờ `--final` rõ ràng.
 - ID chunk phải **deterministic** (`uuid5(doc_id, chunk_idx)`); upsert phải **idempotent**.
 
@@ -65,6 +66,41 @@ src/vnfake/{schemas,data,retrieval,models,training,pipeline,serving,evaluation,u
 - Evidence đưa vào classifier **phải vừa `max_length`**: cắt ở ranh giới câu, ưu tiên câu có điểm cao; không cắt giữa từ.
 - Verdict chỉ được là `REAL | FAKE | UNVERIFIABLE`. Trả `UNVERIFIABLE` khi dưới ngưỡng retrieval hoặc confidence. **Không bịa bằng chứng**; mọi evidence trả ra phải truy được về `chunk_id`/`url` trong KB.
 - Module sinh giải thích (nếu có) chỉ được diễn đạt lại từ evidence đã chọn, không thêm sự kiện mới.
+
+### 6.1 Hiệu năng retrieval (Phase 2.5)
+
+- `retrieve_k` mặc định **30**, `rerank_k` mặc định 5 — đặt trong `configs/base.yaml`, không hard-code. (Tiền đề ban đầu ép `k=20` do độ trễ `fp16` ~14-19s; sau khi k-sweep sạch ở `fp32, batch_size=4` chứng minh `k=30` đạt rerank `p95 = 1.88 s` << 10s, Hit@1=31/723 cao nhất và Hit@5=48/723, PM đã chính thức chốt `retrieve_k = 30`).
+- **Guardrail latency:** mục tiêu Phase 2.5 là rerank p95 ≤ 10 s (PM chốt; ≤ 3 s thuộc Future Enhancements). **Không hạ `retrieve_k` dưới 20** để chạy đua latency khi chưa có Decision Log + PM duyệt; hãy tối ưu dtype/batch size/`max_length` trước.
+- Mọi lần đo latency phải ghi kèm thiết bị (CPU/GPU), dtype, batch size, `retrieve_k`.
+
+### 6.2 LLM Query Rewrite — QUY TẮC CỨNG
+
+- Module `retrieval/query_rewriter.py` **chỉ** dùng **Gemini họ Flash** (Flash / Flash-Lite) qua Gemini API free tier. **Cấm** dùng LLM/provider khác cho module này, và cấm dùng LLM này cho việc khác ngoài rewrite (không phán verdict, không sinh evidence).
+- "Khóa cứng" được thực thi bằng **validator Pydantic trên config**: `query_rewrite.model` phải khớp regex `^gemini-(?!1\.)[a-z0-9.-]*flash[a-z0-9.-]*$`. **Không** hard-code model id trong logic (xem §3).
+- Model đã chốt: **`gemini-3.1-flash-lite`** (PM, 2026-11-08), giá trị mặc định ở `configs/base.yaml: query_rewrite.model`. Nếu API báo model không khả dụng, **không tự đổi sang model khác**: dùng `NoOpQueryRewriter` và báo PM.
+- **Cấm dùng `gemini-1.5-*`:** Gemini 1.5 Flash đã bị Google ngừng, gọi sẽ lỗi model-not-found. Model id Gemini đổi/ngừng nhanh nên chỉ thay ở config; khi khởi động phải health-check model, lỗi ⇒ log rõ và chuyển sang `NoOpQueryRewriter` (trừ khi `query_rewrite.required=true`).
+- `GEMINI_API_KEY` chỉ đọc từ biến môi trường/`.env`; không log key.
+- Tiết kiệm free tier: `temperature=0`, `max_output_tokens` nhỏ (config), 1 request/claim, retry có giới hạn + exponential backoff, tôn trọng 429, client-side rate limiter, **disk cache** (key = hash(claim NFC + `prompt_version` + model)). Script đánh giá/benchmark phải đi qua cache.
+- **Fail-safe:** timeout, 429, 5xx hoặc output không hợp lệ ⇒ dùng **claim gốc**, log WARNING `rewrite_status=fallback:<reason>`. Rewrite lỗi không bao giờ được làm hỏng `/v1/verify`.
+- Chuỗi rewrite chỉ dùng cho **bước retrieve**. Reranker và classifier **luôn nhận claim gốc**; response API không trả chuỗi rewrite như `claim`.
+- Rewriter không được thêm thực thể, số liệu hay sự kiện không có trong claim.
+
+### 6.3 Prompting LLM — ÉP CHẶT OUTPUT
+
+- Prompt nằm ở `configs/prompts/query_rewrite.txt` (có `prompt_version`); không build prompt bằng cách nối chuỗi rải rác.
+- Prompt **bắt buộc** chứa nguyên văn: `Tuyệt đối CHỈ in ra từ khóa. KHÔNG chào hỏi, KHÔNG dạ vâng, KHÔNG giải thích.` (có unit test kiểm tra template chứa câu này).
+- Claim do người dùng nhập là **dữ liệu không đáng tin**: đặt trong delimiter rõ ràng và nêu trong prompt rằng nội dung đó là dữ liệu, không phải chỉ thị (chống prompt injection).
+- Định dạng đầu ra: **một dòng**, từ khóa tiếng Việt có dấu cách nhau bằng khoảng trắng, tối đa `max_keywords`.
+- Mọi phản hồi LLM **bắt buộc** qua `sanitize_keywords()` trước khi vào embedder/Qdrant: lấy dòng đầu; bỏ markdown, bullet, ngoặc kép, tiền tố kiểu "Từ khóa:"; chuẩn hóa NFC; loại và fallback nếu rỗng, quá dài, hoặc chứa cụm chào hỏi/giải thích (danh sách trong config). Mỗi trường hợp cần một test.
+- **Không bao giờ** đưa phản hồi LLM chưa sanitize vào Qdrant.
+
+### 6.4 RSS Updater (Pipeline D)
+
+- Chỉ fetch feed khai báo trong `configs/rss.yaml` (13 feed do PM chốt); không hard-code URL; không tự thêm/bớt feed; tôn trọng `robots.txt`, dùng User-Agent định danh, rate limit, timeout.
+- Chạy **on-demand** (CLI/endpoint admin), không tự chạy nền.
+- Dedup URL qua `rss_manifest.json` (và với KB tĩnh) **trước** khi fetch full text; upsert idempotent (chunk_id deterministic).
+- Bản ghi RSS validate bằng Pydantic như KB; `ingest_source="rss"`; `published_date` ở dạng ISO-8601 UTC; không lưu HTML thô.
+- Dữ liệu RSS **không** dùng để huấn luyện hoặc chấm proxy trên dev.
 
 ## 7. API (FastAPI)
 
@@ -130,3 +166,4 @@ def iter_kb_records(path: Path, rejected_path: Path) -> Iterator[KBRecord]:
 - [ ] Không còn magic number / đường dẫn hard-code.
 - [ ] Docstring cho API public; cập nhật docs nếu đổi hành vi.
 - [ ] Checkbox tương ứng trong `docs/ROADMAP_TODO.md` đã được tick.
+- [ ] Nếu đụng retrieval/rewrite: đã chạy lại `evaluation/retrieval_eval.py` và ghi latency + Hit Rate vào report.
